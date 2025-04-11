@@ -192,31 +192,59 @@ print(f"MNIST train: {len(mnist_train)}, test: {len(mnist_test)}")
 # Neural Network Architecture
 
 class FeatureExtractor(nn.Module):
-    def __init__(self):
+    def __init__(self, use_bn=False, use_dropout=False, dropout_rate=0.5):
         super(FeatureExtractor, self).__init__()
-        self.conv_block = nn.Sequential(
+        # self.conv_block = nn.Sequential(
+        #     nn.Conv2d(3, 64, kernel_size=5, padding=2),
+        #     # print(f"shape: {self.conv_block[0].weight.shape}"),
+        #     nn.ReLU(),
+        #     nn.MaxPool2d(kernel_size=3, stride=2),
+        #     # print(f"shape: {self.conv_block[1].weight.shape}"),
+
+        #     nn.Conv2d(64, 64, kernel_size=5, padding=2),
+        #     # print(f"shape: {self.conv_block[2].weight.shape}"),
+        #     nn.ReLU(),
+        #     nn.MaxPool2d(kernel_size=3, stride=2),
+        #     # print(f"shape: {self.conv_block[3].weight.shape}"),
+
+        #     nn.Conv2d(64, 128, kernel_size=5, padding=2),
+        #     # print(f"shape: {self.conv_block[4].weight.shape}"),
+        #     nn.ReLU()
+        # )
+
+        layers = [
             nn.Conv2d(3, 64, kernel_size=5, padding=2),
-            # print(f"shape: {self.conv_block[0].weight.shape}"),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=3, stride=2),
-            # print(f"shape: {self.conv_block[1].weight.shape}"),
 
             nn.Conv2d(64, 64, kernel_size=5, padding=2),
-            # print(f"shape: {self.conv_block[2].weight.shape}"),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=3, stride=2),
-            # print(f"shape: {self.conv_block[3].weight.shape}"),
 
             nn.Conv2d(64, 128, kernel_size=5, padding=2),
-            # print(f"shape: {self.conv_block[4].weight.shape}"),
             nn.ReLU()
-        )
+        ]
+        if use_bn:
+            layers.append(nn.BatchNorm2d(128))
 
-        self.fc = nn.Sequential(
+        layers.append(nn.ReLU())
+
+        self.conv_block = nn.Sequential(*layers)
+
+        # self.fc = nn.Sequential(
+        #     nn.Flatten(),
+        #     nn.Linear(128 * 7 * 7, 3072),  # assuming 32x32 input size
+        #     nn.ReLU()
+        # )
+        fc_layers = [
             nn.Flatten(),
             nn.Linear(128 * 7 * 7, 3072),  # assuming 32x32 input size
             nn.ReLU()
-        )
+        ]
+        if use_dropout:
+            fc_layers.append(nn.Dropout(dropout_rate))
+        self.fc = nn.Sequential(*fc_layers)
+
 
     def forward(self, x):
         x = self.conv_block(x)
@@ -224,13 +252,24 @@ class FeatureExtractor(nn.Module):
         return x
 
 class Classifier(nn.Module):
-    def __init__(self, input_dim=3072, hidden_dim=2048, num_classes=10):
+    def __init__(self, input_dim=3072, hidden_dim=2048, num_classes=10 , use_bn=False , use_dropout=False, dropout_rate=0.5):
         super(Classifier, self).__init__()
-        self.classifier = nn.Sequential(
+        # self.classifier = nn.Sequential(
+        #     nn.Linear(input_dim, hidden_dim),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_dim, num_classes)
+        # )
+        layers = [
             nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, num_classes)
-        )
+        ]
+        if use_bn:
+            layers.append(nn.BatchNorm1d(hidden_dim))
+        layers.append(nn.ReLU())
+        if use_dropout:
+            layers.append(nn.Dropout(dropout_rate))
+        layers.append(nn.Linear(hidden_dim, num_classes))
+        self.classifier = nn.Sequential(*layers)
+
 
     def forward(self, x):
         return self.classifier(x)
@@ -290,7 +329,7 @@ def cross_view_penalty(F1, F2):
 # Training Classes 
 
 class DomainAdaptationModel():
-    def __init__(self, Source_train_ds, Source_train_loader, Target_train_ds, Target_train_loader, Source_test_loader, Target_test_loader, name, num_classes=10 , num_iters=10,K=10):
+    def __init__(self, Source_train_ds, Source_train_loader, Target_train_ds, Target_train_loader, Source_test_loader, Target_test_loader, name, use_bn = False, use_dropout=False, dropout_rate = 0.5, num_classes=10 , num_iters=10,K=10):
         self.Source_train_ds = Source_train_ds
         self.Target_train_ds = Target_train_ds
         self.Source_train_loader = Source_train_loader
@@ -301,10 +340,10 @@ class DomainAdaptationModel():
         self.num_classes = num_classes
 
         # Initialize models
-        self.F = FeatureExtractor().to(device)
-        self.F1 = Classifier().to(device)
-        self.F2 = Classifier().to(device)
-        self.Ft = Classifier().to(device)
+        self.F = FeatureExtractor(use_bn=use_bn, use_dropout=use_dropout, dropout_rate=dropout_rate).to(device)
+        self.F1 = Classifier(use_bn=use_bn, use_dropout=use_dropout, dropout_rate=dropout_rate).to(device)
+        self.F2 = Classifier(use_bn=use_bn, use_dropout=use_dropout, dropout_rate=dropout_rate).to(device)
+        self.Ft = Classifier(use_bn=False, use_dropout=use_dropout, dropout_rate=dropout_rate).to(device)
 
         # Optimizers
         self.optimizer_F = optim.SGD(self.F.parameters(), lr=0.01, momentum=0.9)
@@ -378,6 +417,11 @@ class DomainAdaptationModel():
                 torch.save(self.F1.state_dict(), os.path.join(self.path, 'F1.pth'))
                 torch.save(self.F2.state_dict(), os.path.join(self.path, 'F2.pth'))
                 torch.save(self.Ft.state_dict(), os.path.join(self.path, 'Ft.pth'))
+                print("Models saved.")
+                torch.save(self.F.state_dict(), os.path.join(self.path, f'F_clean_{num_iters}.pth'))
+                torch.save(self.F1.state_dict(), os.path.join(self.path, f'F1_clean_{num_iters}.pth'))
+                torch.save(self.F2.state_dict(), os.path.join(self.path, f'F2_clean_{num_iters}.pth'))
+                torch.save(self.Ft.state_dict(), os.path.join(self.path, f'Ft_clean_{num_iters}.pth'))
                 print("Models saved.")
 
 
@@ -574,22 +618,7 @@ if __name__ == "__main__":
 
     print("Starting Domain Adaptation...")
     # Initialize the model
-    print("Initializing model for MNIST to SVHN...")
-    model2 = DomainAdaptationModel(
-        Source_train_ds=mnist_train,
-        Source_train_loader=mnist_train_loader,
-        Target_train_ds=svhn_train,
-        Target_train_loader=svhn_train_loader,
-        Source_test_loader=mnist_test_loader,
-        Target_test_loader=svhn_test_loader,
-        name='MNIST_SVHN',
-        num_classes=10,
-        num_iters=20,
-        K=1000
-    )
 
-    # Train the model
-    model2.train(Nt=1000)
 
     # Initialize the model
     print("Initializing model for SVHN to MNIST...")
@@ -600,17 +629,38 @@ if __name__ == "__main__":
         Target_train_loader=mnist_train_loader,
         Source_test_loader=svhn_test_loader,
         Target_test_loader=mnist_test_loader,
-        name='SVHN_MNIST',
+        name='SVHN_MNIST_nbn_ydo',
+        use_bn=False,
+        use_dropout=True,
         num_classes=10,
-        num_iters=10,
-        K=10
+        num_iters=20,
+        K=100
     )
     # Train the model
     model.train(Nt=1000)
 
-    # pickle the model
     with open(os.path.join(model.path, 'model.pkl'), 'wb') as f:
         pickle.dump(model, f)
+
+    print("Initializing model for MNIST to SVHN...")
+    model2 = DomainAdaptationModel(
+        Source_train_ds=mnist_train,
+        Source_train_loader=mnist_train_loader,
+        Target_train_ds=svhn_train,
+        Target_train_loader=svhn_train_loader,
+        Source_test_loader=mnist_test_loader,
+        Target_test_loader=svhn_test_loader,
+        name='MNIST_SVHN_nbn_ydo',
+        use_bn=False,
+        use_dropout=True,
+        num_classes=10,
+        num_iters=20,
+        K=1000
+    )
+
+    # Train the model
+    model2.train(Nt=1000)
+
     with open(os.path.join(model2.path, 'model.pkl'), 'wb') as f:
         pickle.dump(model2, f)
 
