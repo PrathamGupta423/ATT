@@ -29,6 +29,7 @@ import logging
 from functools import wraps
 from datetime import datetime
 
+import pickle
 
 
 # Set random seed for reproducibility
@@ -62,8 +63,8 @@ print(f"Using device: {device}")
 
 
 # Dataset Paths 
-path_svhn_train = '/home/pratham/UDA_project/datasets/svhn/train_32x32.mat' 
-path_svhn_test = '/home/pratham/UDA_project/datasets/svhn/test_32x32.mat'
+path_svhn_train = 'svhn/train_32x32.mat' 
+path_svhn_test = 'svhn/test_32x32.mat'
 
 # Utility Functions
 def dense_to_one_hot_svhn(labels_dense, num_classes=10):
@@ -331,39 +332,53 @@ class DomainAdaptationModel():
         # Intial Training
         num_iters = self.num_iters
         self.metrics = []
-        for epoch in tqdm(range(num_iters)):
-            for xs, ys in self.Source_train_loader:
-                xs, ys = xs.to(device), ys.to(device)
-                feats = self.F(xs)
+        if os.path.exists(os.path.join(self.path, 'F.pth')):
+            print("Loading existing models...")
+            self.F.load_state_dict(torch.load(os.path.join(self.path, 'F.pth')))
+            self.F1.load_state_dict(torch.load(os.path.join(self.path, 'F1.pth')))
+            self.F2.load_state_dict(torch.load(os.path.join(self.path, 'F2.pth')))
+            self.Ft.load_state_dict(torch.load(os.path.join(self.path, 'Ft.pth')))
+        else:
+            print("Training models from scratch...")
+            
+            for epoch in tqdm(range(num_iters)):
+                for xs, ys in self.Source_train_loader:
+                    xs, ys = xs.to(device), ys.to(device)
+                    feats = self.F(xs)
 
-                out1 = self.F1(feats)
-                out2 = self.F2(feats)
-                loss1 =self.criterion(out1, ys)
-                loss2 =self.criterion(out2, ys)
+                    out1 = self.F1(feats)
+                    out2 = self.F2(feats)
+                    loss1 =self.criterion(out1, ys)
+                    loss2 =self.criterion(out2, ys)
 
-                # Cross-view constraint ||W1^T W2||
-                W1 = self.F1.classifier[0].weight  # adjust if different layer name
-                W2 = self.F2.classifier[0].weight
-                cross_loss = self.cross_view_penalty_weight * torch.norm(torch.mm(W1.T, W2))
+                    # Cross-view constraint ||W1^T W2||
+                    W1 = self.F1.classifier[0].weight  # adjust if different layer name
+                    W2 = self.F2.classifier[0].weight
+                    cross_loss = self.cross_view_penalty_weight * torch.norm(torch.mm(W1.T, W2))
 
-                loss_total = loss1 + loss2 + cross_loss
+                    loss_total = loss1 + loss2 + cross_loss
 
-                self.optimizer_F1.zero_grad()
-                self.optimizer_F2.zero_grad()
-                self.optimizer_F.zero_grad()
+                    self.optimizer_F1.zero_grad()
+                    self.optimizer_F2.zero_grad()
+                    self.optimizer_F.zero_grad()
 
-                loss_total.backward()
-                self.optimizer_F1.step()
-                self.optimizer_F2.step()
-                self.optimizer_F.step()
-                # Print loss for monitoring
-            # if epoch % 1 == 0:
-            print(f"Epoch [{epoch+1}/{num_iters}], Loss1: {loss1.item():.4f}, Loss2: {loss2.item():.4f}, Cross Loss: {cross_loss.item():.4f}")
-            Total_loss = loss1 + loss2 + cross_loss
-            # metrics = self.test(tag = 'Initial', u = epoch)
-            # self.metrics.append(metrics)
-            print(f"Total Loss: {Total_loss.item():.4f}")
-            # print(f"Accuracy: {metrics['Accuracy']:.4f}")
+                    loss_total.backward()
+                    self.optimizer_F1.step()
+                    self.optimizer_F2.step()
+                    self.optimizer_F.step()
+                    # Print loss for monitoring
+                # if epoch % 1 == 0:
+                print(f"Epoch [{epoch+1}/{num_iters}], Loss1: {loss1.item():.4f}, Loss2: {loss2.item():.4f}, Cross Loss: {cross_loss.item():.4f}")
+                Total_loss = loss1 + loss2 + cross_loss
+                # metrics = self.test(tag = 'Initial', u = epoch)
+                # self.metrics.append(metrics)
+                print(f"Total Loss: {Total_loss.item():.4f}")
+                # print(f"Accuracy: {metrics['Accuracy']:.4f}")
+                torch.save(self.F.state_dict(), os.path.join(self.path, 'F.pth'))
+                torch.save(self.F1.state_dict(), os.path.join(self.path, 'F1.pth'))
+                torch.save(self.F2.state_dict(), os.path.join(self.path, 'F2.pth'))
+                torch.save(self.Ft.state_dict(), os.path.join(self.path, 'Ft.pth'))
+                print("Models saved.")
 
 
         # Pseudo-labeling
@@ -390,36 +405,34 @@ class DomainAdaptationModel():
                     xL, yL = xL.to(device), yL.to(device)
                     xtl, ytl = xtl.to(device), ytl.to(device)
                 
-                    featsL = self.F(xL)
-                    out1 = self.F1(featsL)
-                    out2 = self.F2(featsL)
+                    # featsL = self.F(xL)
+                    # out1 = self.F1(featsL)
+                    # out2 = self.F2(featsL)
 
-                    loss1 = self.criterion(out1, yL)
-                    loss2 = self.criterion(out2, yL)
-                    W1 = self.F1.classifier[0].weight  # adjust if different layer name
-                    W2 = self.F2.classifier[0].weight
-                    cross_loss =  torch.norm(torch.mm(W1.T, W2)) * self.cross_view_penalty_weight
+                    # loss1 = self.criterion(out1, yL)
+                    # loss2 = self.criterion(out2, yL)
+                    # W1 = self.F1.classifier[0].weight  # adjust if different layer name
+                    # W2 = self.F2.classifier[0].weight
+                    # cross_loss =  torch.norm(torch.mm(W1.T, W2)) * self.cross_view_penalty_weight
 
-                    total_loss = loss1 + loss2 + cross_loss
+                    # total_loss = loss1 + loss2 + cross_loss
 
-                    self.optimizer_F1.zero_grad()
-                    self.optimizer_F2.zero_grad()
-                    self.optimizer_F.zero_grad()
-                    total_loss.backward()
-                    self.optimizer_F1.step()
-                    self.optimizer_F2.step()
-                    self.optimizer_F.step()
+                    # self.optimizer_F1.zero_grad()
+                    # self.optimizer_F2.zero_grad()
+                    # self.optimizer_F.zero_grad()
+                    # total_loss.backward()
+                    # self.optimizer_F1.step()
+                    # self.optimizer_F2.step()
+                    # self.optimizer_F.step()
 
-                    
-                    featsT = self.F(xtl)
+                    with torch.no_grad():
+                        featsT = self.F(xtl).detach()
                     outt = self.Ft(featsT)
                     lossFt = self.criterion(outt, ytl)
 
                     self.optimizer_Ft.zero_grad()
-                    self.optimizer_F.zero_grad()
                     lossFt.backward()
                     self.optimizer_Ft.step()
-                    self.optimizer_F.step()
 
             Nt = int((k + 1) * len(self.Target_train_ds) / K)
             Xt_l_x, Xt_l_y = labeling(self.F, self.F1, self.F2, self.Target_train_loader, Nt)
@@ -427,13 +440,21 @@ class DomainAdaptationModel():
             L_combined = list(self.Source_train_ds) + list(zip(Xt_l_x, Xt_l_y))
             L_loader = DataLoader(L_combined, batch_size=batch_size, shuffle=True)
 
-            print(f"Iteration [{k+1}/{K}], Nt: {Nt}, Loss1: {loss1.item():.4f}, Loss2: {loss2.item():.4f}, Cross Loss: {cross_loss.item():.4f}, Ft Loss: {lossFt.item():.4f}")
-            Total_loss = loss1 + loss2 + cross_loss + lossFt
+            # print(f"Iteration [{k+1}/{K}], Nt: {Nt}, Loss1: {loss1.item():.4f}, Loss2: {loss2.item():.4f}, Cross Loss: {cross_loss.item():.4f}, Ft Loss: {lossFt.item():.4f}")
+            # Total_loss = loss1 + loss2 + cross_loss + lossFt
+            Total_loss = lossFt
+            print(f"Iteration [{k+1}/{K}], Nt: {Nt}, Ft Loss: {lossFt.item():.4f}")
 
             metrics = self.test(tag = 'Iter', u = k)
             self.metrics.append(metrics)
             print(f"Total Loss: {Total_loss.item():.4f}")
             print(f"Accuracy: {metrics['Accuracy']:.4f}")
+            # Save the model
+            torch.save(self.F.state_dict(), os.path.join(self.path, 'F.pth'))
+            torch.save(self.F1.state_dict(), os.path.join(self.path, 'F1.pth'))
+            torch.save(self.F2.state_dict(), os.path.join(self.path, 'F2.pth'))
+            torch.save(self.Ft.state_dict(), os.path.join(self.path, 'Ft.pth'))
+            print("Models saved.")
 
         # Save the model
         torch.save(self.F.state_dict(), os.path.join(self.path, 'F.pth'))
@@ -460,6 +481,11 @@ class DomainAdaptationModel():
         self.plot_confusion_matrix(self.confusion_matrix, classes=range(self.num_classes),
                                    title=f'Confusion Matrix for {self.name} {L} {O}')
         stats = self.stats()
+        # save the stats
+        with open(os.path.join(self.path, f'stats_{L}_{O}.txt'), 'w') as f:
+            for key, value in stats.items():
+                f.write(f"{key}: {value}\n")
+        # Print stats
         return stats
 
 
@@ -545,8 +571,11 @@ class DomainAdaptationModel():
             
 # Example usage
 if __name__ == "__main__":
+
+    print("Starting Domain Adaptation...")
     # Initialize the model
-    model = DomainAdaptationModel(
+    print("Initializing model for MNIST to SVHN...")
+    model2 = DomainAdaptationModel(
         Source_train_ds=mnist_train,
         Source_train_loader=mnist_train_loader,
         Target_train_ds=svhn_train,
@@ -555,14 +584,16 @@ if __name__ == "__main__":
         Target_test_loader=svhn_test_loader,
         name='MNIST_SVHN',
         num_classes=10,
-        num_iters=15,
-        K=15
+        num_iters=20,
+        K=1000
     )
 
     # Train the model
-    model.train(Nt=1000)
+    model2.train(Nt=1000)
 
-    model2 = DomainAdaptationModel(
+    # Initialize the model
+    print("Initializing model for SVHN to MNIST...")
+    model = DomainAdaptationModel(
         Source_train_ds=svhn_train,
         Source_train_loader=svhn_train_loader,
         Target_train_ds=mnist_train,
@@ -571,9 +602,19 @@ if __name__ == "__main__":
         Target_test_loader=mnist_test_loader,
         name='SVHN_MNIST',
         num_classes=10,
-        num_iters=15,
-        K=15
+        num_iters=10,
+        K=10
     )
     # Train the model
-    model2.train(Nt=1000)
+    model.train(Nt=1000)
+
+    # pickle the model
+    with open(os.path.join(model.path, 'model.pkl'), 'wb') as f:
+        pickle.dump(model, f)
+    with open(os.path.join(model2.path, 'model.pkl'), 'wb') as f:
+        pickle.dump(model2, f)
+
+
+
+
 
