@@ -1,6 +1,6 @@
-# Python Environment Setup
+## ATT
 
-## Create Conda Environment
+### Create Conda Environment
 
 Use the following command to create a new conda environment with necessary dependencies:
 
@@ -13,6 +13,8 @@ After creation, activate the environment using:
 conda activate ATT
 ```
 
+
+### Running the Code
 To run the code use the following command:
 ```bash
 python3 ATT.py
