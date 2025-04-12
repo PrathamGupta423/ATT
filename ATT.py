@@ -329,7 +329,7 @@ def cross_view_penalty(F1, F2):
 # Training Classes 
 
 class DomainAdaptationModel():
-    def __init__(self, Source_train_ds, Source_train_loader, Target_train_ds, Target_train_loader, Source_test_loader, Target_test_loader, name, use_bn = False, use_dropout=False, dropout_rate = 0.5, num_classes=10 , num_iters=10,K=10):
+    def __init__(self, Source_train_ds, Source_train_loader, Target_train_ds, Target_train_loader, Source_test_loader, Target_test_loader, name, use_bn = False, use_dropout=False, dropout_rate = 0.5, num_classes=10 , num_iters=10,K=10 , cross_view_penalty_weight=0.01):
         self.Source_train_ds = Source_train_ds
         self.Target_train_ds = Target_train_ds
         self.Source_train_loader = Source_train_loader
@@ -355,7 +355,7 @@ class DomainAdaptationModel():
         # Threshold for pseudo-labeling
         self.threshold = 0.95
         # Cross-view penalty weight
-        self.cross_view_penalty_weight = 0.01
+        self.cross_view_penalty_weight = cross_view_penalty_weight
 
         # Storage Location
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -449,34 +449,35 @@ class DomainAdaptationModel():
                     xL, yL = xL.to(device), yL.to(device)
                     xtl, ytl = xtl.to(device), ytl.to(device)
                 
-                    # featsL = self.F(xL)
-                    # out1 = self.F1(featsL)
-                    # out2 = self.F2(featsL)
+                    featsL = self.F(xL)
+                    out1 = self.F1(featsL)
+                    out2 = self.F2(featsL)
 
-                    # loss1 = self.criterion(out1, yL)
-                    # loss2 = self.criterion(out2, yL)
-                    # W1 = self.F1.classifier[0].weight  # adjust if different layer name
-                    # W2 = self.F2.classifier[0].weight
-                    # cross_loss =  torch.norm(torch.mm(W1.T, W2)) * self.cross_view_penalty_weight
+                    loss1 = self.criterion(out1, yL)
+                    loss2 = self.criterion(out2, yL)
+                    W1 = self.F1.classifier[0].weight  # adjust if different layer name
+                    W2 = self.F2.classifier[0].weight
+                    cross_loss =  torch.norm(torch.mm(W1.T, W2)) * self.cross_view_penalty_weight
 
-                    # total_loss = loss1 + loss2 + cross_loss
+                    total_loss = loss1 + loss2 + cross_loss
 
-                    # self.optimizer_F1.zero_grad()
-                    # self.optimizer_F2.zero_grad()
-                    # self.optimizer_F.zero_grad()
-                    # total_loss.backward()
-                    # self.optimizer_F1.step()
-                    # self.optimizer_F2.step()
-                    # self.optimizer_F.step()
+                    self.optimizer_F1.zero_grad()
+                    self.optimizer_F2.zero_grad()
+                    self.optimizer_F.zero_grad()
+                    total_loss.backward()
+                    self.optimizer_F1.step()
+                    self.optimizer_F2.step()
+                    self.optimizer_F.step()
 
-                    with torch.no_grad():
-                        featsT = self.F(xtl).detach()
+                    featsT = self.F(xtl)
                     outt = self.Ft(featsT)
                     lossFt = self.criterion(outt, ytl)
 
                     self.optimizer_Ft.zero_grad()
+                    self.optimizer_F.zero_grad()
                     lossFt.backward()
                     self.optimizer_Ft.step()
+                    self.optimizer_F.step()
 
             Nt = int((k + 1) * len(self.Target_train_ds) / K)
             Xt_l_x, Xt_l_y = labeling(self.F, self.F1, self.F2, self.Target_train_loader, Nt)
@@ -484,9 +485,9 @@ class DomainAdaptationModel():
             L_combined = list(self.Source_train_ds) + list(zip(Xt_l_x, Xt_l_y))
             L_loader = DataLoader(L_combined, batch_size=batch_size, shuffle=True)
 
-            # print(f"Iteration [{k+1}/{K}], Nt: {Nt}, Loss1: {loss1.item():.4f}, Loss2: {loss2.item():.4f}, Cross Loss: {cross_loss.item():.4f}, Ft Loss: {lossFt.item():.4f}")
-            # Total_loss = loss1 + loss2 + cross_loss + lossFt
-            Total_loss = lossFt
+            print(f"Iteration [{k+1}/{K}], Nt: {Nt}, Loss1: {loss1.item():.4f}, Loss2: {loss2.item():.4f}, Cross Loss: {cross_loss.item():.4f}, Ft Loss: {lossFt.item():.4f}")
+            Total_loss = loss1 + loss2 + cross_loss + lossFt
+            # Total_loss = lossFt
             print(f"Iteration [{k+1}/{K}], Nt: {Nt}, Ft Loss: {lossFt.item():.4f}")
 
             metrics = self.test(tag = 'Iter', u = k)
@@ -620,8 +621,59 @@ if __name__ == "__main__":
     # Initialize the model
 
 
-    # Initialize the model
-    print("Initializing model for SVHN to MNIST...")
+    # # Initialize the model
+    # print("Initializing model for SVHN to MNIST with no batch norm, Dropout and cross-view penalty...")
+    # model = DomainAdaptationModel(
+    #     Source_train_ds=svhn_train,
+    #     Source_train_loader=svhn_train_loader,
+    #     Target_train_ds=mnist_train,
+    #     Target_train_loader=mnist_train_loader,
+    #     Source_test_loader=svhn_test_loader,
+    #     Target_test_loader=mnist_test_loader,
+    #     name='SVHN_MNIST_nbn_ydo',
+    #     use_bn=False,
+    #     use_dropout=True,
+    #     num_classes=10,
+    #     num_iters=20,
+    #     K=100,
+    #     cross_view_penalty_weight=0.01
+    # )
+
+    # # Train the model
+    # model.train(Nt=1000)
+    # print("Training completed.")
+    # # Save the model
+    # with open(os.path.join(model.path, 'model_SVHN_MNIST_nbn_ydo.pkl'), 'wb') as f:
+    #     pickle.dump(model, f)
+
+    # print("Model saved.")
+
+    # print("Initializing model for MNIST with no batch norm, Dropout and cross-view penalty...")
+    # model_mnist = DomainAdaptationModel(
+    #     Source_train_ds=mnist_train,
+    #     Source_train_loader=mnist_train_loader,
+    #     Target_train_ds=svhn_train,
+    #     Target_train_loader=svhn_train_loader,
+    #     Source_test_loader=mnist_test_loader,
+    #     Target_test_loader=svhn_test_loader,
+    #     name='MNIST_SVHN_nbn_ydo',
+    #     use_bn=False,
+    #     use_dropout=True,
+    #     num_classes=10,
+    #     num_iters=20,
+    #     K=100,
+    #     cross_view_penalty_weight=0.01
+    # )
+    # # Train the model
+    # model_mnist.train(Nt=1000)
+    # print("Training completed.")
+
+    # # Save the model
+    # with open(os.path.join(model_mnist.path, 'model_MNIST_SVHN_nbn_ydo.pkl'), 'wb') as f:
+    #     pickle.dump(model_mnist, f)
+    # print("Model saved.")
+
+    print("Initializing model for SVHN to MNIST with batch norm, Dropout and cross-view penalty...")
     model = DomainAdaptationModel(
         Source_train_ds=svhn_train,
         Source_train_loader=svhn_train_loader,
@@ -629,40 +681,50 @@ if __name__ == "__main__":
         Target_train_loader=mnist_train_loader,
         Source_test_loader=svhn_test_loader,
         Target_test_loader=mnist_test_loader,
-        name='SVHN_MNIST_nbn_ydo',
-        use_bn=False,
+        name='SVHN_MNIST_bn_ydo',
+        use_bn=True,
         use_dropout=True,
         num_classes=10,
         num_iters=20,
-        K=100
+        K=40,
+        cross_view_penalty_weight=0.01
     )
     # Train the model
     model.train(Nt=1000)
-
-    with open(os.path.join(model.path, 'model.pkl'), 'wb') as f:
+    print("Training completed.")
+    # Save the model
+    with open(os.path.join(model.path, 'model_SVHN_MNIST_bn_ydo.pkl'), 'wb') as f:
         pickle.dump(model, f)
 
-    print("Initializing model for MNIST to SVHN...")
-    model2 = DomainAdaptationModel(
+    print("Model saved.")
+    print("Initializing model for MNIST to SVHN with batch norm, Dropout and cross-view penalty...")
+    model_mnist = DomainAdaptationModel(
         Source_train_ds=mnist_train,
         Source_train_loader=mnist_train_loader,
         Target_train_ds=svhn_train,
         Target_train_loader=svhn_train_loader,
         Source_test_loader=mnist_test_loader,
         Target_test_loader=svhn_test_loader,
-        name='MNIST_SVHN_nbn_ydo',
-        use_bn=False,
+        name='MNIST_SVHN_bn_ydo',
+        use_bn=True,
         use_dropout=True,
         num_classes=10,
         num_iters=20,
-        K=1000
+        K=40,
+        cross_view_penalty_weight=0.01
     )
-
     # Train the model
-    model2.train(Nt=1000)
+    model_mnist.train(Nt=1000)
+    print("Training completed.")
+    # Save the model
+    with open(os.path.join(model_mnist.path, 'model_MNIST_SVHN_bn_ydo.pkl'), 'wb') as f:
+        pickle.dump(model_mnist, f)
+    print("Model saved.")
 
-    with open(os.path.join(model2.path, 'model.pkl'), 'wb') as f:
-        pickle.dump(model2, f)
+    
+    
+
+
 
 
 
